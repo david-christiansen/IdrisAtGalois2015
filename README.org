@@ -1,0 +1,4 @@
+* Support files for Idris course at Galois, January 2015
+
+This directory contains slides and support files for the introduction
+to Idris held at Galois in January 2015. Watch this space for more.
