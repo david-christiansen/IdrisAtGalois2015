@@ -72,7 +72,7 @@ data Member : a -> List a -> Type where
   ||| The element we want is contained in the tail somewhere
   There : Member x xs -> Member x (y :: xs)
 
--- (*) Show that the empty list has no members
+||| The empty list has no members
 nilIsEmpty : Member x [] -> Void
 nilIsEmpty Here impossible
 -- impossible states that the pattern doesn't type-check. This
