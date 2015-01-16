@@ -45,11 +45,11 @@ instance Monad (Vect n) where
 -- * Define takeWhile for Vect.  takeWhile p xs should return the
 -- longest prefix of xs for which p holds. What should the return type
 -- be?
-takeWhile : (a -> Bool) -> Vect n a -> (m ** Vect m a)-- ?ret
+takeWhile : (a -> Bool) -> Vect n a -> ?ret
 
 -- * Define an analogous function dropWhile that returns the elements
 -- following the longest prefix that satisfies p.
-dropWhile : (a -> Bool) -> Vect n a -> (m ** Vect m a)-- ?ret
+dropWhile : (a -> Bool) -> Vect n a -> ?ret'
 
 -- ** Prove that the list versions of takeWhile and dropWhile split the
 -- list at the same point
