@@ -3,6 +3,8 @@ module Lecture2Code
 import Control.Monad.Identity
 import Control.Monad.State
 import Debug.Error
+import Language.Reflection
+import Language.Reflection.Errors
 
 
 -- AST
@@ -124,19 +126,27 @@ run store (Mutate x e) = return (write x !(evalIO store e) store)
 
 -- Code generation
 namespace SExpr
-  data SExpr = Symbol String | Nil | Cons SExpr SExpr | SStr String | SInt Int
+  data SExpr = Symbol String
+             | Nil
+             | (::) SExpr SExpr
+             | SStr String
+             | SInt Int
 
   toList : SExpr -> Maybe $ List SExpr
   toList [] = Just []
-  toList (Cons a b) = map (a ::) (toList b)
+  toList (a :: b) = map (a ::) (toList b)
   toList _ = Nothing
+
+  fromList : List SExpr -> SExpr
+  fromList xs = foldr (::) Nil xs
 
   instance Show SExpr where
     show (Symbol x) = x
     show [] = "nil"
-    show cons@(Cons x y) = case toList cons of
-                             Just elts => "(" ++ foldr (++) "" (intersperse " " (map show elts)) ++ ")"
-                             Nothing => "(" ++ show x ++ " . " ++ show y ++ ")"
+    show cons@(x :: y) =
+      case toList cons of
+        Just elts => "(" ++ foldr (++) "" (intersperse " " (map show elts)) ++ ")"
+        Nothing => "(" ++ show x ++ " . " ++ show y ++ ")"
     show (SStr x) = show x
     show (SInt x) = show x
 
@@ -144,7 +154,7 @@ namespace SExpr
   fresh = do i <- get
              put (i + the Int 1)
              return $ ("v" ++ show i)
-  
+
   namespace Names
     data Names : List Ty -> Type where
       Nil : Names []
@@ -161,27 +171,35 @@ namespace SExpr
   genExpr ns (Var x) = return . Symbol $ getName ns x
   genExpr ns (CstI x) = return (SInt x)
   genExpr ns (CstS x) = return (SStr x)
-  genExpr ns (SToI x) = return (Cons (Symbol "string-to-number") (Cons !(genExpr ns x) Nil))
-  genExpr ns (Plus x y) = return (Cons (Symbol "+") (Cons !(genExpr ns x) (Cons !(genExpr ns y) Nil)))
-  genExpr ns (LessThan x y) = return (Cons (Symbol "<") (Cons !(genExpr ns x) (Cons !(genExpr ns y) Nil)))
-  genExpr ns (IToS x) = return (Cons (Symbol "number-to-string") (Cons !(genExpr ns x) Nil))
-  genExpr ns (Append x y) = return (Cons (Symbol "concat") (Cons !(genExpr ns x) (Cons !(genExpr ns y) Nil)))
+  genExpr ns (SToI x) = return $ fromList [Symbol "string-to-number", !(genExpr ns x)]
+  genExpr ns (Plus x y) = return $ fromList [Symbol "+", !(genExpr ns x), !(genExpr ns y)]
+  genExpr ns (LessThan x y) = return [Symbol "<", !(genExpr ns x), !(genExpr ns y)]
+  genExpr ns (IToS x) = return [Symbol "number-to-string", !(genExpr ns x)]
+  genExpr ns (Append x y) = return [Symbol "concat", !(genExpr ns x), !(genExpr ns y)]
+
+  inSeq : Stmt ctxt -> List (Stmt ctxt)
+  inSeq (Seq x y) = inSeq x ++ inSeq y
+  inSeq stmt = [stmt]
 
   getStmt : Names ctxt -> Stmt ctxt -> State Int SExpr
   getStmt ns Skip = return Nil
-  getStmt ns (Seq y z) = return $ Cons (Symbol "progn") (Cons !(getStmt ns y) (Cons !(getStmt ns z) Nil))
-  getStmt ns (While y z) = return $ Cons (Symbol "while") (Cons !(genExpr ns y) (Cons !(getStmt ns z) Nil))
+  getStmt ns s@(Seq y z) = do body <- map fromList $ traverse (getStmt ns) (inSeq s)
+                              return (Symbol "progn" :: body)
+  getStmt ns (While y z) = return [Symbol "while", !(genExpr ns y), !(getStmt ns z)]
   getStmt ns (Let y z) =
     do n <- fresh
-       return (Cons (Symbol "let")
-         (Cons (Cons (Cons (Symbol n) (Cons !(genExpr ns y) Nil)) Nil)
-               (Cons !(getStmt (n::ns) z) Nil)))
-  getStmt ns (Print y) = return $ Cons (Symbol "message") (Cons !(genExpr ns y) Nil)
-  getStmt ns (Read y) = return $ (Cons (Symbol "setq") (Cons (Symbol (getName ns y))
-                                   (Cons (Cons (Symbol "read-string") (Cons (SStr "> ") Nil)) Nil)))
-  getStmt ns (Mutate y z) = return $ Cons (Symbol "setq") (Cons (Symbol (getName ns y)) (Cons !(genExpr ns z) Nil))
+       return [Symbol "let",
+                [[Symbol n, !(genExpr ns y)]],
+                !(getStmt (n::ns) z)]
+  getStmt ns (Print y) = return [Symbol "message", !(genExpr ns y)]
+  getStmt ns (Read y) = return [Symbol "setq", Symbol (getName ns y),
+                                [Symbol "read-string", SStr "> "]]
+  getStmt ns (Mutate y z) = return [Symbol "setq", Symbol (getName ns y), !(genExpr ns z)]
+
+
   compile : Stmt [] -> SExpr
   compile prog = runIdentity . map fst $ runStateT (getStmt [] prog) 0
+
 
 -- Concrete syntax
 
@@ -196,7 +214,7 @@ dsl lang
 (>>=) first andThen = Seq first (andThen ())
 
 implicit
-convVar : HasType ctxt t -> Expr ctxt t
+convVar : (ix : HasType ctxt t) -> Expr ctxt t
 convVar = Var
 
 implicit
@@ -220,8 +238,10 @@ infix 1 +=
 (+=) : HasType ctxt INT -> Expr ctxt INT -> Stmt ctxt
 x += i = x := x + i
 
+Program : Type
+Program = Stmt []
 
-foo : Stmt []
+foo : Program
 foo = lang (do let x = 2
                Print (IToS x)
                While (x < 10) $ do
@@ -229,7 +249,7 @@ foo = lang (do let x = 2
                  Print (IToS x)
                Print (CstS "done"))
 
-readInts : Stmt []
+readInts : Program
 readInts = lang (do let x = ""
                     let i = 9999
                     While 1 $ do
@@ -238,10 +258,30 @@ readInts = lang (do let x = ""
                       i := SToI x
                       Print (IToS i))
 
+%language ErrorReflection
+
+betterVarErrors : Err -> Maybe (List ErrorReportPart)
+betterVarErrors (CantUnify _ tm `(HasType (List.(::) ~t ~_) ~found) err _ _) =
+  Just [ TextPart "Expected a variable with type", TermPart t
+       , TextPart "but got a variable with type ", TermPart found
+       ]
+betterVarErrors _ = Nothing
+
+%error_handlers convVar ix betterVarErrors
+
+borken : Program
+borken = lang (do let x = ""
+                  let i = 9999
+                  While 1 $ do
+                    Print "Enter a number"
+                    Read x
+                    i := x
+                    Print (IToS i))
+
 
 -- Stuff
 
 namespace Main
   main : IO ()
   main = run [] readInts $> pure ()
-  
+
