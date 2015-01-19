@@ -13,8 +13,13 @@ data Ty = STRING | INT
 
 %name Ty t,t',t''
 
-data HasType : List Ty -> Ty -> Type where
+||| Well-typed de Bruijn indices.
+||| @ ctxt the typing context, with recent variables on the left
+||| @ t the type at the index pointed to
+data HasType : (ctxt : List Ty) -> (t : Ty) -> Type where
+  ||| Zero: the type is the first element of the context
   Here : HasType (t::ts) t
+  ||| Successor: the type is in the tail of the context
   There : HasType ts t -> HasType (t'::ts) t
 
 data Expr : List Ty -> Ty -> Type where
@@ -32,18 +37,25 @@ data Expr : List Ty -> Ty -> Type where
   IToS : Expr ctxt INT -> Expr ctxt STRING
   Append : Expr ctxt STRING -> Expr ctxt STRING -> Expr ctxt STRING
 
-
 data Stmt : List Ty -> Type where
   Skip : Stmt ctxt
   Seq : Stmt ctxt -> Stmt ctxt -> Stmt ctxt
   While : Expr ctxt INT -> Stmt ctxt -> Stmt ctxt
+
+  ||| Introduce and initialize a variable
   Let : Expr ctxt t -> Stmt (t::ctxt) -> Stmt ctxt
+
   Print : Expr ctxt STRING -> Stmt ctxt
+
   Read : HasType ctxt STRING -> Stmt ctxt
   Mutate : HasType ctxt t -> Expr ctxt t -> Stmt ctxt
 
+
 
--- Semantics
+-- # Semantics
+
+||| Use Idris values to represent DSL values. DSL types _code for_
+||| Idris types.
 
 Value : Ty -> Type
 Value STRING = String
@@ -51,18 +63,20 @@ Value INT    = Int
 
 %name Value val
 
+||| In-memory storage for typed variables.
 data Store : List Ty -> Type where
   Nil : Store []
   (::) : Value t -> Store ts -> Store (t::ts)
 
 %name Store store
 
+
 read : HasType ctxt t -> Store ctxt -> Value t
-read Here (val :: store) = val
+read Here      (val :: store) = val
 read (There x) (val :: store) = read x store
 
 write : HasType ctxt t -> Value t -> Store ctxt -> Store ctxt
-write Here val (_ :: store) = val :: store
+write Here      val (_    :: store) = val :: store
 write (There x) val (val' :: store) = val' :: write x val store
 
 alloc : Value t -> Store ctxt -> Store (t::ctxt)
@@ -209,10 +223,7 @@ dsl lang
   index_next  = There
   let         = Let
 
-
-(>>=) : Stmt ctxt -> (() -> Stmt ctxt) -> Stmt ctxt
-(>>=) first andThen = Seq first (andThen ())
-
+||| Convert raw lvalues into variables as needed
 implicit
 convVar : (ix : HasType ctxt t) -> Expr ctxt t
 convVar = Var
@@ -223,6 +234,7 @@ convStr = CstS
 
 fromInteger : Integer -> Expr ctxt INT
 fromInteger x = CstI (fromInteger x)
+
 
 infix 1 :=
 (:=) : HasType ctxt t -> Expr ctxt t -> Stmt ctxt
@@ -241,13 +253,17 @@ x += i = x := x + i
 Program : Type
 Program = Stmt []
 
-foo : Program
-foo = lang (do let x = 2
-               Print (IToS x)
-               While (x < 10) $ do
-                 x += 1
-                 Print (IToS x)
-               Print (CstS "done"))
+(>>=) : Stmt ctxt -> (() -> Stmt ctxt) -> Stmt ctxt
+(>>=) first andThen = Seq first (andThen ())
+
+countUp : Program
+countUp =
+  lang (do let x = 2
+           Print (IToS x)
+           While (x < 10) $ do
+             x += 1
+             Print (IToS x)
+           Print "done")
 
 readInts : Program
 readInts = lang (do let x = ""

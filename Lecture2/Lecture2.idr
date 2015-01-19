@@ -112,123 +112,345 @@ namespace FreeVars
   const2' = term2 (\f, x => f `App2` x)
   -- {{{Examine definition|||idris-talk-show-const2}}}
 
--- # A Well-Typed Interpreter
+-- # A Typed Imperative Language
 
--- Term1 and Term2 guarantee scope safety, but not type safety.
--- Let's replace our free variable count with a list of their types.
--- Our interpreter can then map our terms to their Idris equivalents.
+-- In the rest of the lecture, we embed a simple imperative language
+-- in Idris, making it as convenient as possible.
 
--- ## Types
+
+-- # Types, Contexts, and Variables
 
--- We must restrict terms to the types we support. Elements of Ty are
--- codes for types, that we can map to Idris types. This is a closed
--- universe.
-
-data Ty = INT | ARR Ty Ty
+||| DSL types
+data Ty = STRING | INT
 
 %name Ty t,t',t''
 
-interp : Ty -> Type
-interp INT        = Int
-interp (ARR t t') = interp t -> interp t'
+||| Well-typed de Bruijn indices, to be used as lvalues
+||| @ ctxt the typing context, with recent variables on the left
+||| @ t the type at the index pointed to
+data HasType : (ctxt : List Ty) -> (t : Ty) -> Type where
+  ||| Zero: the type is the first element of the context
+  Here : HasType (t::ts) t
+  ||| Successor: the type is in the tail of the context
+  There : HasType ts t -> HasType (t'::ts) t
 
 
--- # Typing contexts
+-- # Expressions
 
--- A context becomes a list of Ty, and a variable selects an element.
--- It combines the Nat and the Less from before, with added types.
-data Index : List Ty -> Ty -> Type where
-  Here : Index (t :: ts) t
-  There : Index ts t -> Index (t'::ts) t
+data Expr : List Ty -> Ty -> Type where
+  Var : HasType ctxt t -> Expr ctxt t
 
-%name Index ix
+  CstI : Int -> Expr ctxt INT
+  CstS : String -> Expr ctxt STRING
 
-exampleIx : Index [INT, ARR INT INT, ARR INT (ARR INT INT)] (ARR INT INT)
-exampleIx = There Here
+  -- SToI should crash at runtime if the string is invalid
+  SToI : Expr ctxt STRING -> Expr ctxt INT
+  Plus : Expr ctxt INT -> Expr ctxt INT -> Expr ctxt INT
+  LessThan : Expr ctxt INT -> Expr ctxt INT -> Expr ctxt INT
 
-
--- # Terms
+  IToS : Expr ctxt INT -> Expr ctxt STRING
+  Append : Expr ctxt STRING -> Expr ctxt STRING -> Expr ctxt STRING
 
-||| Well-typed terms.
-||| @ ctxt the context in which the term is well-typed\
-||| @ t the type of the term in `ctxt`
-data Term : (ctxt : List Ty) -> (t : Ty) -> Type where
-  CstI : (i : Int) -> Term ctxt INT
-  Plus : (x, y : Term ctxt INT) -> Term ctxt INT
-  App : (f : Term ctxt (ARR t t')) ->
-        (x : Term ctxt t) ->
-        Term ctxt t'
-  Lam : (body : Term (t::ctxt) t') ->
-        Term ctxt (ARR t t')
-  Var : Index ctxt t -> Term ctxt t
-
-%name Term tm,tm',tm''
 
 
--- # The Interpreter
--- ## Run-time environments
-||| Run-time environments contain the right type of value for each
-||| variable in `ctxt`
-data Env : (ctxt : List Ty) -> Type where
-  Nil : Env []
-  (::) : interp t -> Env ctxt -> Env (t :: ctxt)
+-- # Statements
 
-%name Env env
+data Stmt : List Ty -> Type where
+  Skip : Stmt ctxt
+  Seq : Stmt ctxt -> Stmt ctxt -> Stmt ctxt
+  While : Expr ctxt INT -> Stmt ctxt -> Stmt ctxt
 
-lookup : Env ctxt -> Index ctxt t -> interp t
-lookup (x :: env) Here       = x
-lookup (x :: env) (There ix) = lookup env ix
+  ||| Introduce and initialize a variable
+  Let : Expr ctxt t -> Stmt (t::ctxt) -> Stmt ctxt
 
-
--- # The Interpreter
+  Print : Expr ctxt STRING -> Stmt ctxt
 
-eval : Env ctxt -> Term ctxt t -> interp t
-eval env (CstI x) = x
-eval env (Plus tm tm') = eval env tm + eval env tm'
-eval env (App tm tm') = eval env tm $ eval env tm'
-eval env (Lam tm) = \x => eval (x::env) tm
-eval env (Var ix) = lookup env ix
+  Read : HasType ctxt STRING -> Stmt ctxt
+  Mutate : HasType ctxt t -> Expr ctxt t -> Stmt ctxt
 
-answer : Int
-answer =
-  eval [] $
-    Plus (App (Lam (Plus (Var Here) (Var Here))) (CstI 20))
-         (CstI 2)
-
-doubler : Int -> Int
-doubler = eval [] $ Lam (Plus (Var Here) (Var Here))
 
 
--- # Domain-Specific Error Messages
+-- # An Interpreter
+-- ## Memory
+
+||| Use Idris values to represent DSL values. DSL types _code for_
+||| Idris types.
+Value : Ty -> Type
+Value STRING = String
+Value INT    = Int
+
+%name Value val
+
+||| In-memory storage for typed variables.
+data Store : List Ty -> Type where
+  Nil : Store []
+  (::) : Value t -> Store ts -> Store (t :: ts)
+
+%name Store store
+
+
+-- # An Interpreter
+-- ## Interacting with Memory
+
+read : HasType ctxt t -> Store ctxt -> Value t
+read Here      (val :: store) = val
+read (There x) (val :: store) = read x store
+
+write : HasType ctxt t -> Value t -> Store ctxt -> Store ctxt
+write Here      val (_    :: store) = val :: store
+write (There x) val (val' :: store) = val' :: write x val store
+
+alloc : Value t -> Store ctxt -> Store (t::ctxt)
+alloc = (::)
+
+free : Store (t::ctxt) -> Store ctxt
+free (_::store) = store
+
+-- {hide}
+-- this is not interesting for the talk but is needed in the code
+stringToInt : String -> Either String Int
+stringToInt str =
+  let i = cast str
+  in if i == 0
+       then if str == "0"
+              then return 0
+              else Left $ "Invalid string \"" ++ str ++ "\""
+       else return i
+-- {show}
+
+
+-- # An Interpreter
+-- ## Evaluating Expressions
+
+covering
+eval : Store ctxt -> Expr ctxt t -> Either String (Value t)
+eval store (Var x) = pure $ read x store
+eval store (CstI x) = pure x
+eval store (CstS x) = pure x
+eval store (Plus x y) = [| eval store x + eval store y |]
+eval store (LessThan x y) =
+  map boolToInt [| eval store x < eval store y |]
+  where boolToInt : Bool -> Int
+        boolToInt b = if b then 1 else 0
+eval store (IToS x) = map show $ eval store x
+eval store (SToI x) =
+  case stringToInt !(eval store x) of
+    Left err => Left err
+    Right i => Right i
+eval store (Append x y) = [| eval store x ++ eval store y |]
+
+
+-- # An Interpreter
+-- ## Crashing on errors
+
+evalIO : Store ctxt -> Expr ctxt t -> IO (Value t)
+evalIO store expr = case eval store expr of
+                      Left err  => error err
+                      Right val => pure val
+
+-- # An Interpreter
+-- ## Execution of Statements
+
+covering
+run : Store ctxt -> Stmt ctxt -> IO (Store ctxt)
+run store Skip = return store
+run store (Seq x y) =
+  do store' <- run store x
+     run store' y
+run store loop@(While c body) =
+  do cond <- evalIO store c
+     if cond == 0
+       then return store
+       else do store' <- run store body
+               run store' loop
+run store (Let expr body) =
+  do let store' = alloc !(evalIO store expr) store
+     store'' <- run store' body
+     return (free store'')
+run store (Print x) = do putStrLn !(evalIO store x)
+                         return store
+run store (Read addr) = do l <- map trim getLine
+                           return (write addr l store)
+run store (Mutate x e) = return (write x !(evalIO store e) store)
+
+
+-- # Example Program
+
+countUp : Stmt []
+countUp =
+  Let (CstI 2) $
+    Seq (Print (IToS (Var Here)))
+        (Seq (While (LessThan (Var Here) (CstI 10))
+                    (Seq (Mutate Here
+                                 (Plus (Var Here)
+                                       (CstI 1)))
+                         (Print (IToS (Var Here)))))
+             (Print (CstS "done")))
+
+
+
+-- # Concrete Syntax
+
+-- This language will provide only let bindings.
+
+
+-- Variables are not wrapped in a constructor. This is to allow them
+-- to be used as lvalues in statements like Mutate and Read.
+
+dsl lang
+  variable    = id
+  index_first = Here
+  index_next  = There
+  let         = Let
+
+||| Convert raw lvalues into variable expressions as needed
+implicit
+convVar : (ix : HasType ctxt t) -> Expr ctxt t
+convVar = Var
+
+
+-- # Concrete Syntax
+
+-- We can now write more readable bindings
+
+countUpBetter : Stmt []
+countUpBetter =
+  lang (let x = CstI 2 in
+        Seq (Print (IToS x))
+            (Seq (While (LessThan x (CstI 10))
+                        (Seq (Mutate x
+                                     (Plus x (CstI 1)))
+                             (Print (IToS x))))
+                 (Print (CstS "done"))))
+
+
+-- # Concrete Syntax
+
+-- We can allow string and integer literals with an implicit coercion
+-- and a fromInteger implementation, respectively
+
+implicit
+convStr : String -> Expr ctxt STRING
+convStr = CstS
+
+fromInteger : Integer -> Expr ctxt INT
+fromInteger x = CstI (fromInteger x)
+
+
+-- # Concrete Syntax
+-- ## Handy infix operators
+
+infix 1 :=
+(:=) : HasType ctxt t -> Expr ctxt t -> Stmt ctxt
+(:=) = Mutate
+
+(<) : Expr ctxt INT -> Expr ctxt INT -> Expr ctxt INT
+(<) = LessThan
+
+(+) : Expr ctxt INT -> Expr ctxt INT -> Expr ctxt INT
+(+) = Plus
+
+infix 1 +=
+(+=) : HasType ctxt INT -> Expr ctxt INT -> Stmt ctxt
+x += i = x := x + i
+
+
+-- # Concrete Syntax
+-- ## Now with operators and literals
+
+countUpYetBetter : Stmt []
+countUpYetBetter =
+  lang (let x = 2 in
+        Seq (Print (IToS x))
+            (Seq (While (x < 10)
+                        (Seq (x += 1)
+                             (Print (IToS x))))
+                 (Print "done")))
+
+
+-- # Concrete Syntax
+-- ## do-Notation
+
+-- Like Scala's for comprehesions, Idris's do-notation is rewritten
+-- purely syntactically, and types are used to disambguate overloaded
+-- names.
+
+(>>=) : Stmt ctxt -> (() -> Stmt ctxt) -> Stmt ctxt
+(>>=) first andThen = Seq first (andThen ())
+
+countUpGreat : Stmt []
+countUpGreat =
+  lang (do let x = 2
+           Print (IToS x)
+           While (x < 10) $ do
+             x += 1
+             Print (IToS x)
+           Print "done")
+
+
+-- # Reflect on your Mistakes!
+-- ## Domain-Specific Language, General-Purpose Errors
+
+{-
+borken : Stmt []
+borken = lang (do let x = ""
+                  let i = 9999
+                  While 1 $ do
+                    Print "Enter a number"
+                    Read x
+                    i := x
+                    Print (IToS i))
+-}
+
+
+-- # Reflect on your Mistakes!
+-- ## Rewriting Errors
 
 %language ErrorReflection
 
-intNotFun : Term [] INT
---intNotFun = App (CstI 2) (CstI 23)
-
-funMustBeArr : Err -> Maybe (List ErrorReportPart)
-funMustBeArr (CantUnify _ `(Term ~_ ~t) `(Term ~_ (ARR ~t' ~t'')) _ _ _) =
-  Just [ TermPart t
-       , TextPart "is not a function type"
-       , TermPart t', TextPart "->", TermPart t''
-       , TextPart "and therefore cannot be applied."
+betterVarErrors : Err -> Maybe (List ErrorReportPart)
+betterVarErrors (CantUnify _ tm `(HasType (List.(::) ~t ~_) ~found) err _ _) =
+  Just [ TextPart "Expected a variable with type", TermPart t
+       , TextPart "but got a variable with type ", TermPart found
        ]
+betterVarErrors _ = Nothing
 
-funMustBeArr _ = Nothing
-
-%error_handlers Main.App f funMustBeArr
-
-intStillNotFun : Term [] INT
---intStillNotFun = App (CstI 2) (CstI 23)
+-- %error_handlers convVar ix betterVarErrors
 
 
--- # Source locations
+-- # Reflect on your Mistakes!
+{-
+borken : Stmt []
+borken = lang (do let x = ""
+                  let i = 9999
+                  While 1 $ do
+                    Print "Enter a number"
+                    Read x
+                    i := x
+                    Print (IToS i))
+-}
 
+
+-- # Source Locations
+
+-- SourceLocation represents points or spans in code.
+
+-- {{{Examine definition|||idris-talk-show-loc}}}
+
+-- We can ask the compiler to provide it as an implicit argument.
+
+-- {{{View example|||idris-talk-find-code-file}}}
 
 
 
+-- # Next Week
 
+-- * Compiler overview
+-- * Interactive proving and tactic scripts
+-- * Syntax extensions
+-- * The effects library
 
+
 -- {hide}
 -- Local Variables:
 -- eval: (require 'custom)
@@ -237,6 +459,8 @@ intStillNotFun : Term [] INT
 -- eval: (setq idris-metavariable-show-on-load nil)
 -- eval: (defun idris-talk-show-less (_b) (interactive) (idris-info-for-name :print-definition "Less"))
 -- eval: (defun idris-talk-show-const2 (_b) (interactive) (idris-info-for-name :print-definition "const2'"))
+-- eval: (defun idris-talk-show-loc (_b) (interactive) (idris-info-for-name :print-definition "SourceLocation"))
+-- eval: (defun idris-talk-find-code-file (_b) (interactive) (find-file (expand-file-name "Lecture2Code.idr")))
 -- eval: (make-variable-buffer-local 'face-remapping-alist)
 -- eval: (add-to-list 'face-remapping-alist '(live-code-talks-title-face (:height 2.0
 --                                                                        :slant normal
