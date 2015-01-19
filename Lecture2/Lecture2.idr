@@ -41,9 +41,7 @@ import Language.Reflection.Utils
 -- de Bruijn indices count binders outwards from variables, as an
 -- alternative to string names.
 
--- Named term: λx.λy.x y
-
--- de Bruijn indices: λ.λ.1 0
+-- [[[(image :type imagemagick :file "deBruijn.png" :max-width 0.8 :max-height 0.6)]]]
 
 
 -- # Names vs. de Bruijn Indices
