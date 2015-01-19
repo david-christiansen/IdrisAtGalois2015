@@ -1,188 +1,259 @@
-module Lecture2
+-- {hide}
+-- These slides are intended to be used with live-code-talks-mode for Emacs.
+-- {show}
+
+
+-- # Dependently Typed Programming in Idris
+
+
+
+-- ## David Raymond Christiansen
+
+
+-- ### Session 2: Embedded DSLs
+-- ### January 20, 2015
+
+
+
+-- [[[(image :type imagemagick :file "galois.png" :width 300)]]]
+
+-- {hide}
+module Main
 
 import Debug.Error
+import Language.Reflection
+import Language.Reflection.Errors
+import Language.Reflection.Utils
+-- {show}
 
 
--- AST
+-- # Agenda
 
-data Ty = STRING | INT
+-- * Representing variables
+-- * Overloading binders (DSL blocks)
+-- * Closed universes
+-- * Domain-specific error messages
+-- * Access to source locations
+
+
+-- # de Bruijn Indices: A Refresher
+
+-- de Bruijn indices count binders outwards from variables, as an
+-- alternative to string names.
+
+-- Named term: λx.λy.x y
+
+-- de Bruijn indices: λ.λ.1 0
+
+
+-- # Names vs. de Bruijn Indices
+
+-- ## Explicit Names
+-- * Resemble surface syntax
+-- * Easy to read and write
+-- * Difficult to connect to typing contexts
+-- * α-equivalence is non-trivial
+
+-- ## de Bruijn Indices
+-- * Distant from surface syntax
+-- * Difficult to read and write
+-- * Easy to connect to typing contexts (list lookup)
+-- * α-equivalence is syntactic equality
+--   (extra important in dependent types)
+
+
+-- # Terms indexed by free variables
+
+namespace FreeVars
+  data Less : Nat -> Nat -> Type where
+    ZeroLess : Less Z (S k)
+    SuccLess : Less j k -> Less (S j) (S k)
+
+  data Term1 : Nat -> Type where
+    App1 : Term1 n -> Term1 n -> Term1 n
+    Lam1 : Term1 (S n) -> Term1 n
+    Var1 : (ix : Nat) -> Less ix n -> Term1 n
+
+  const1 : Term1 0
+  const1 = Lam1 (Lam1 (Var1 (S Z) (SuccLess ZeroLess)))
+
+
+-- # Automate the Proof
+
+-- The proof that j < k uniquely determines j!
+-- {{{Examine definition|||idris-talk-show-less}}}
+
+  const1' : Term1 0
+  const1' = Lam1 (Lam1 (Var1 _ (SuccLess ZeroLess)))
+
+  data Term2 : Nat -> Type where
+    App2 : Term2 n -> Term2 n -> Term2 n
+    Lam2 : Term2 (S n) -> Term2 n
+    Var2 : {ix : Nat} -> Less ix n -> Term2 n
+
+  const2 : Term2 0
+  const2 = Lam2 (Lam2 (Var2 (SuccLess ZeroLess)))
+
+
+-- # Terrible for Programming!
+
+-- ## DSL blocks let you write with names,
+-- ## but get de Bruijn-indexed terms.
+
+  dsl term2
+    variable = Var2
+    index_first = ZeroLess
+    index_next = SuccLess
+    lambda = Lam2
+
+  -- You can also override let, dependent functions, and other binders.
+
+  const2' : Term2 0
+  const2' = term2 (\f, x => f `App2` x)
+  -- {{{Examine definition|||idris-talk-show-const2}}}
+
+-- # A Well-Typed Interpreter
+
+-- Term1 and Term2 guarantee scope safety, but not type safety.
+-- Let's replace our free variable count with a list of their types.
+-- Our interpreter can then map our terms to their Idris equivalents.
+
+-- ## Types
+
+-- We must restrict terms to the types we support. Elements of Ty are
+-- codes for types, that we can map to Idris types. This is a closed
+-- universe.
+
+data Ty = INT | ARR Ty Ty
 
 %name Ty t,t',t''
 
-data HasType : List Ty -> Ty -> Type where
-  Here : HasType (t::ts) t
-  There : HasType ts t -> HasType (t'::ts) t
-
-data Expr : List Ty -> Ty -> Type where
-  Var : HasType ctxt t -> Expr ctxt t
-
-  CstI : Int -> Expr ctxt INT
-  CstS : String -> Expr ctxt STRING
-
-  -- crash at runtime if invalid
-  SToI : {default tactics {sourceLocation} loc : SourceLocation} ->
-         Expr ctxt STRING -> Expr ctxt INT
-  Plus : Expr ctxt INT -> Expr ctxt INT -> Expr ctxt INT
-  LessThan : Expr ctxt INT -> Expr ctxt INT -> Expr ctxt INT
-  
-  IToS : Expr ctxt INT -> Expr ctxt STRING
-  Append : Expr ctxt STRING -> Expr ctxt STRING -> Expr ctxt STRING
-
-
-data Stmt : List Ty -> Type where
-  Skip : Stmt ctxt
-  Seq : Stmt ctxt -> Stmt ctxt -> Stmt ctxt
-  While : Expr ctxt INT -> Stmt ctxt -> Stmt ctxt
-  Let : Expr ctxt t -> Stmt (t::ctxt) -> Stmt ctxt
-  Print : Expr ctxt STRING -> Stmt ctxt
-  Read : HasType ctxt STRING -> Stmt ctxt
-  Mutate : HasType ctxt t -> Expr ctxt t -> Stmt ctxt
+interp : Ty -> Type
+interp INT        = Int
+interp (ARR t t') = interp t -> interp t'
 
 
--- Semantics
+-- # Typing contexts
 
-Value : Ty -> Type
-Value STRING = String
-Value INT    = Int
+-- A context becomes a list of Ty, and a variable selects an element.
+-- It combines the Nat and the Less from before, with added types.
+data Index : List Ty -> Ty -> Type where
+  Here : Index (t :: ts) t
+  There : Index ts t -> Index (t'::ts) t
 
-%name Value val
+%name Index ix
 
-data Store : List Ty -> Type where
-  Nil : Store []
-  (::) : Value t -> Store ts -> Store (t::ts)
-
-%name Store store
-
-read : HasType ctxt t -> Store ctxt -> Value t
-read Here (val :: store) = val
-read (There x) (val :: store) = read x store
-
-write : HasType ctxt t -> Value t -> Store ctxt -> Store ctxt
-write Here val (_ :: store) = val :: store
-write (There x) val (val' :: store) = val' :: write x val store
-
-alloc : Value t -> Store ctxt -> Store (t::ctxt)
-alloc = (::)
-
-free : Store (t::ctxt) -> Store ctxt
-free (_::store) = store
-
-stringToInt : String -> Either String Int
-stringToInt str =
-  let i = cast str
-  in if i == 0
-       then if str == "0"
-              then return 0
-              else Left $ "Invalid string \"" ++ str ++ "\""
-       else return i
-
-covering
-eval : Store ctxt -> Expr ctxt t -> Either (SourceLocation, String) (Value t)
-eval store (Var x) = pure $ read x store
-eval store (CstI x) = pure x
-eval store (CstS x) = pure x
-eval store (Plus x y) = [| eval store x + eval store y |]
-eval store (LessThan x y) =
-  map boolToInt [| eval store x < eval store y |]
-  where boolToInt : Bool -> Int
-        boolToInt b = if b then 1 else 0
-eval store (IToS x) = map show $ eval store x
-eval store (SToI {loc} x) =
-  case stringToInt !(eval store x) of
-    Left err => Left (loc, err)
-    Right i => Right i
-eval store (Append x y) = [| eval store x ++ eval store y |]
-
-evalIO : Store ctxt -> Expr ctxt t -> IO (Value t)
-evalIO store expr = case eval store expr of
-                      Left (loc, err) => error {loc} err
-                      Right val => pure val
-covering
-run : Store ctxt -> Stmt ctxt -> IO (Store ctxt)
-run store Skip = return store
-run store (Seq x y) =
-  do store' <- run store x
-     run store' y
-run store loop@(While c body) =
-  do cond <- evalIO store c
-     if cond == 0
-       then return store
-       else do store' <- run store body
-               run store' loop
-run store (Let expr body) =
-  do let store' = alloc !(evalIO store expr) store
-     store'' <- run store' body
-     return (free store'')
-run store (Print x) = do putStrLn !(evalIO store x)
-                         return store
-run store (Read addr) = do l <- map trim getLine
-                           return (write addr l store)
-run store (Mutate x e) = return (write x !(evalIO store e) store)
+exampleIx : Index [INT, ARR INT INT, ARR INT (ARR INT INT)] (ARR INT INT)
+exampleIx = There Here
 
 
--- Code generation
+-- # Terms
+
+||| Well-typed terms.
+||| @ ctxt the context in which the term is well-typed\
+||| @ t the type of the term in `ctxt`
+data Term : (ctxt : List Ty) -> (t : Ty) -> Type where
+  CstI : (i : Int) -> Term ctxt INT
+  Plus : (x, y : Term ctxt INT) -> Term ctxt INT
+  App : (f : Term ctxt (ARR t t')) ->
+        (x : Term ctxt t) ->
+        Term ctxt t'
+  Lam : (body : Term (t::ctxt) t') ->
+        Term ctxt (ARR t t')
+  Var : Index ctxt t -> Term ctxt t
+
+%name Term tm,tm',tm''
+
+
+-- # The Interpreter
+-- ## Run-time environments
+||| Run-time environments contain the right type of value for each
+||| variable in `ctxt`
+data Env : (ctxt : List Ty) -> Type where
+  Nil : Env []
+  (::) : interp t -> Env ctxt -> Env (t :: ctxt)
+
+%name Env env
+
+lookup : Env ctxt -> Index ctxt t -> interp t
+lookup (x :: env) Here       = x
+lookup (x :: env) (There ix) = lookup env ix
+
+
+-- # The Interpreter
+
+eval : Env ctxt -> Term ctxt t -> interp t
+eval env (CstI x) = x
+eval env (Plus tm tm') = eval env tm + eval env tm'
+eval env (App tm tm') = eval env tm $ eval env tm'
+eval env (Lam tm) = \x => eval (x::env) tm
+eval env (Var ix) = lookup env ix
+
+answer : Int
+answer =
+  eval [] $
+    Plus (App (Lam (Plus (Var Here) (Var Here))) (CstI 20))
+         (CstI 2)
+
+doubler : Int -> Int
+doubler = eval [] $ Lam (Plus (Var Here) (Var Here))
+
+
+-- # Domain-Specific Error Messages
+
+%language ErrorReflection
+
+intNotFun : Term [] INT
+--intNotFun = App (CstI 2) (CstI 23)
+
+funMustBeArr : Err -> Maybe (List ErrorReportPart)
+funMustBeArr (CantUnify _ `(Term ~_ ~t) `(Term ~_ (ARR ~t' ~t'')) _ _ _) =
+  Just [ TermPart t
+       , TextPart "is not a function type"
+       , TermPart t', TextPart "->", TermPart t''
+       , TextPart "and therefore cannot be applied."
+       ]
+
+funMustBeArr _ = Nothing
+
+%error_handlers Main.App f funMustBeArr
+
+intStillNotFun : Term [] INT
+--intStillNotFun = App (CstI 2) (CstI 23)
+
+
+-- # Source locations
+
 
 
 
--- Concrete syntax
-
-dsl lang
-  variable    = id
-  index_first = Here
-  index_next  = There
-  let         = Let
 
 
-(>>=) : Stmt ctxt -> (() -> Stmt ctxt) -> Stmt ctxt
-(>>=) first andThen = Seq first (andThen ())
-
-implicit
-convVar : HasType ctxt t -> Expr ctxt t
-convVar = Var
-
-implicit
-convStr : String -> Expr ctxt STRING
-convStr = CstS
-
-fromInteger : Integer -> Expr ctxt INT
-fromInteger x = CstI (fromInteger x)
-
-infix 1 :=
-(:=) : HasType ctxt t -> Expr ctxt t -> Stmt ctxt
-(:=) = Mutate
-
-(<) : Expr ctxt INT -> Expr ctxt INT -> Expr ctxt INT
-(<) = LessThan
-
-(+) : Expr ctxt INT -> Expr ctxt INT -> Expr ctxt INT
-(+) = Plus
-
-infix 1 +=
-(+=) : HasType ctxt INT -> Expr ctxt INT -> Stmt ctxt
-x += i = x := x + i
-
-
-foo : Stmt []
-foo = lang (do let x = 2
-               Print (IToS x)
-               While (x < 10) $ do
-                 x += 1
-                 Print (IToS x)
-               Print (CstS "done"))
-
-readInts : Stmt []
-readInts = lang (do let x = ""
-                    let i = 9999
-                    While 1 $ do
-                      Print "Enter a number"
-                      Read x
-                      i := SToI x
-                      Print (IToS i))
-
-
--- Stuff
-
-namespace Main
-  main : IO ()
-  main = run [] readInts $> pure ()
-  
+-- {hide}
+-- Local Variables:
+-- eval: (require 'custom)
+-- eval: (eldoc-mode -1)
+-- eval: (make-variable-buffer-local 'idris-metavariable-show-on-load)
+-- eval: (setq idris-metavariable-show-on-load nil)
+-- eval: (defun idris-talk-show-less (_b) (interactive) (idris-info-for-name :print-definition "Less"))
+-- eval: (defun idris-talk-show-const2 (_b) (interactive) (idris-info-for-name :print-definition "const2'"))
+-- eval: (make-variable-buffer-local 'face-remapping-alist)
+-- eval: (add-to-list 'face-remapping-alist '(live-code-talks-title-face (:height 2.0
+--                                                                        :slant normal
+--                                                                        :foreground "black" :family "Deja Vu Sans" :weight bold)))
+-- eval: (add-to-list 'face-remapping-alist '(live-code-talks-subtitle-face (:height 1.5
+--                                                                           :slant normal
+--                                                                           :foreground "black" :family "Deja Vu Sans" :weight semibold)))
+-- eval: (add-to-list 'face-remapping-alist '(live-code-talks-subsubtitle-face (:height 1.3
+--                                                                              :slant normal
+--                                                                              :foreground "black" :family "Deja Vu Sans")))
+-- eval: (add-to-list 'face-remapping-alist
+--                    '(live-code-talks-comment-face (:slant normal
+--                                                    :foreground "black"
+--                                                    :family "Deja Vu Sans")))
+-- eval: (add-to-list 'face-remapping-alist
+--                    '(idris-loaded-region-face (:background nil)))
+-- End:
+-- {show}
+ 
+ 
