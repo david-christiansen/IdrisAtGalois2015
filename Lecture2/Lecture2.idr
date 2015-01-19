@@ -31,11 +31,12 @@ import Language.Reflection.Utils
 
 -- * Representing variables
 -- * Overloading binders (DSL blocks)
--- * Closed universes
+-- * Extended Example
 -- * Domain-specific error messages
 -- * Access to source locations
 
 
+
 -- # de Bruijn Indices: A Refresher
 
 -- de Bruijn indices count binders outwards from variables, as an
@@ -63,7 +64,8 @@ import Language.Reflection.Utils
 -- # Terms indexed by free variables
 
 namespace FreeVars
-  data Less : Nat -> Nat -> Type where
+  ||| A proof that j < k
+  data Less : (j, k : Nat) -> Type where
     ZeroLess : Less Z (S k)
     SuccLess : Less j k -> Less (S j) (S k)
 
@@ -135,7 +137,7 @@ data HasType : (ctxt : List Ty) -> (t : Ty) -> Type where
 
 -- # Expressions
 
-data Expr : List Ty -> Ty -> Type where
+data Expr : (ctxt : List Ty) -> (t : Ty) -> Type where
   Var : HasType ctxt t -> Expr ctxt t
 
   CstI : Int -> Expr ctxt INT
@@ -417,6 +419,8 @@ betterVarErrors _ = Nothing
 
 
 -- # Reflect on your Mistakes!
+-- ## Domain-Specific Language, Domain-Specific Errors
+
 {-
 borken : Stmt []
 borken = lang (do let x = ""
