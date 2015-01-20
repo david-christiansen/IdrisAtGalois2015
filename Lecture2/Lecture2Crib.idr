@@ -75,7 +75,7 @@ namespace FreeVars
     Var1 : (ix : Nat) -> Less ix n -> Term1 n
 
   const1 : Term1 0
-  const1 = ?const1_rhs
+
 
 
 -- # Automate the Proof
@@ -193,12 +193,18 @@ data Store : List Ty -> Type where
 -- ## Interacting with Memory
 
 read : HasType ctxt t -> Store ctxt -> Value t
+read Here      (val :: store) = val
+read (There x) (val :: store) = read x store
 
 write : HasType ctxt t -> Value t -> Store ctxt -> Store ctxt
+write Here      val (_    :: store) = val :: store
+write (There x) val (val' :: store) = val' :: write x val store
 
 alloc : Value t -> Store ctxt -> Store (t::ctxt)
+alloc = (::)
 
 free : Store (t::ctxt) -> Store ctxt
+free (_::store) = store
 
 -- {hide}
 -- this is not interesting for the talk but is needed in the code
@@ -232,9 +238,6 @@ eval store (SToI x) =
     Left err => Left err
     Right i => Right i
 eval store (Append x y) = [| eval store x ++ eval store y |]
-
--- {{{Show desugared|||idris-talk-show-eval}}}
-
 
 
 -- # An Interpreter
@@ -459,7 +462,6 @@ borken = lang (do let x = ""
 -- eval: (defun idris-talk-show-less (_b) (interactive) (idris-info-for-name :print-definition "Less"))
 -- eval: (defun idris-talk-show-const2 (_b) (interactive) (idris-info-for-name :print-definition "const2'"))
 -- eval: (defun idris-talk-show-loc (_b) (interactive) (idris-info-for-name :print-definition "SourceLocation"))
--- eval: (defun idris-talk-show-eval (_b) (interactive) (idris-info-for-name :print-definition "eval"))
 -- eval: (defun idris-talk-find-code-file (_b) (interactive) (find-file (expand-file-name "Lecture2Code.idr")))
 -- eval: (make-variable-buffer-local 'face-remapping-alist)
 -- eval: (add-to-list 'face-remapping-alist '(live-code-talks-title-face (:height 2.0
