@@ -412,9 +412,11 @@ betterVarErrors (CantUnify _ tm `(HasType (List.(::) ~t ~_) ~found) err _ _) =
        ]
 betterVarErrors _ = Nothing
 
--- %error_handlers convVar ix betterVarErrors
+{-
+%error_handlers convVar ix betterVarErrors
+-}
 
-
+ 
 -- # Reflect on your Mistakes!
 -- ## Domain-Specific Language, Domain-Specific Errors
 
