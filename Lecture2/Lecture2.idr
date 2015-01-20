@@ -456,6 +456,7 @@ borken = lang (do let x = ""
 -- eval: (eldoc-mode -1)
 -- eval: (make-variable-buffer-local 'idris-metavariable-show-on-load)
 -- eval: (setq idris-metavariable-show-on-load nil)
+-- eval: (setq-local page-delimiter "^ *")
 -- eval: (defun idris-talk-show-less (_b) (interactive) (idris-info-for-name :print-definition "Less"))
 -- eval: (defun idris-talk-show-const2 (_b) (interactive) (idris-info-for-name :print-definition "const2'"))
 -- eval: (defun idris-talk-show-loc (_b) (interactive) (idris-info-for-name :print-definition "SourceLocation"))
