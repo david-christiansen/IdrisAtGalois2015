@@ -109,7 +109,7 @@ namespace FreeVars
   -- You can also override let, dependent functions, and other binders.
 
   const2' : Term2 0
-  const2' = term2 (\f, x => f `App2` x)
+  const2' = term2 (\x, y => x)
   -- {{{Examine definition|||idris-talk-show-const2}}}
 
 -- # A Typed Imperative Language

@@ -109,7 +109,7 @@ namespace FreeVars
   -- You can also override let, dependent functions, and other binders.
 
   const2' : Term2 0
-  const2' = term2 (\f, x => f `App2` x)
+  const2' = term2 (\x, y => x)
   -- {{{Examine definition|||idris-talk-show-const2}}}
 
 -- # A Typed Imperative Language
@@ -412,9 +412,11 @@ betterVarErrors (CantUnify _ tm `(HasType (List.(::) ~t ~_) ~found) err _ _) =
        ]
 betterVarErrors _ = Nothing
 
--- %error_handlers convVar ix betterVarErrors
+{-
+%error_handlers convVar ix betterVarErrors
+-}
 
-
+ 
 -- # Reflect on your Mistakes!
 -- ## Domain-Specific Language, Domain-Specific Errors
 
@@ -456,6 +458,7 @@ borken = lang (do let x = ""
 -- eval: (eldoc-mode -1)
 -- eval: (make-variable-buffer-local 'idris-metavariable-show-on-load)
 -- eval: (setq idris-metavariable-show-on-load nil)
+-- eval: (setq-local page-delimiter "^ *")
 -- eval: (defun idris-talk-show-less (_b) (interactive) (idris-info-for-name :print-definition "Less"))
 -- eval: (defun idris-talk-show-const2 (_b) (interactive) (idris-info-for-name :print-definition "const2'"))
 -- eval: (defun idris-talk-show-loc (_b) (interactive) (idris-info-for-name :print-definition "SourceLocation"))
