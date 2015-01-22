@@ -102,7 +102,6 @@ plusIsCommutative (S k) y =
   in cong (plusIsCommutative k y)
 
 
-
 -- # Interactive Proving and Tactics Scripts
 
 -- We can also use the tactic system
@@ -159,22 +158,8 @@ reverseVector : Vect n a -> Vect n a
 reverseVector xs = go [] xs
   where
     go : Vect j a -> Vect k a -> Vect (j+k) a
-    go acc []        ?= {doneLemma} acc
-    go acc (x :: xs) ?= {stepLemma} go (x::acc) xs
-
-
----------- Proofs ----------
-Lecture3.stepLemma = proof
-  intros
-  rewrite plusSuccRightSucc j n1
-  exact value
-
-
-
-Lecture3.doneLemma = proof
-  intros
-  rewrite sym $ plusZeroRightNeutral j
-  exact value
+    go acc []        = ?go_rhs1 -- acc
+    go acc (x :: xs) = ?go_rhs2 -- go (x::acc) xs
 
 
 
@@ -199,9 +184,11 @@ syntax [tm] "∈" [ty] = the ty tm
 namespace Main
   hello : { [STDIO] } Eff ()
   hello = putStrLn "Hello, world!"
-  
---  main : IO ()
---  main = run hello
+
+  {-
+  main : IO ()
+  main = run hello
+  -}
 
 
 -- # Resource State
@@ -237,8 +224,10 @@ namespace Main
   greetNames : { [FILE_IO (), STDIO] } Eff ()
   greetNames = greet !(getNames "names.txt")
 
---  main : IO ()
---  main = run greetNames
+  {-
+  main : IO ()
+  main = run greetNames
+  -}
 
 
 -- # Composing Effectful Programs
@@ -267,14 +256,14 @@ data Counter : Effect where
   Increment :        { Int } Counter ()
   Read      :        { Int } Counter Int
 
-{-
-syntax "{" [inst] "}" [eff] =
-  eff inst (\result => inst)
-syntax "{" [inst] "==>" "{" {b} "}" [outst] "}" [eff] =
-  eff inst (\b => outst)
-syntax "{" [inst] "==>" [outst] "}" [eff] =
-  eff inst (\result => outst)
--}
+
+-- syntax "{" [inst] "}" [eff] =
+--   eff inst (\result => inst)
+-- syntax "{" [inst] "==>" "{" {b} "}" [outst] "}" [eff] =
+--   eff inst (\b => outst)
+-- syntax "{" [inst] "==>" [outst] "}" [eff] =
+--   eff inst (\result => outst)
+
 
 COUNTER : Type -> EFFECT
 COUNTER t = MkEff t Counter
@@ -294,6 +283,7 @@ instance Handler Counter m where
 
 
 -- # Convenient interface
+
 init : { [COUNTER ()] ==> [COUNTER Int] } Eff ()
 init = call Init
 
@@ -304,7 +294,6 @@ read : { [COUNTER Int] } Eff Int
 read = call Lecture3.Read
 
 
-
 -- # Running effects
 
 namespace Main
@@ -321,6 +310,23 @@ namespace Main
           go = do init; howManyDavids ["David", "Not David", "David", "someone else"]
 
 
+-- # Thanks for attending!
+
+-- ## More info
+-- * idris-lang.org
+-- * github.com/idris-lang/Idris-dev
+-- * github.com/idris-hackers
+-- * #idris on Freenode
+
+-- ## Find me later
+-- * david@davidchristiansen.dk
+-- * itu.dk/people/drc
+-- * github.com/david-christiansen
+
+-- ## Exercises
+-- Will be posted to the Galois blog entry, or at
+-- github.com/david-christiansen/IdrisAtGalois2015
+
 
 -- {hide}
 -- Local Variables:

@@ -321,6 +321,24 @@ namespace Main
           go = do init; howManyDavids ["David", "Not David", "David", "someone else"]
 
 
+-- # Thanks for attending!
+
+-- ## More info
+-- * idris-lang.org
+-- * github.com/idris-lang/Idris-dev
+-- * github.com/idris-hackers
+-- * #idris on Freenode
+
+-- ## Find me later
+-- * david@davidchristiansen.dk
+-- * itu.dk/people/drc
+-- * github.com/david-christiansen
+
+-- ## Exercises
+-- Will be posted to the Galois blog entry, or at
+-- github.com/david-christiansen/IdrisAtGalois2015
+
+
 
 -- {hide}
 -- Local Variables:
