@@ -2,3 +2,10 @@
 
 This directory contains slides and support files for the introduction
 to Idris held at Galois in January 2015. Watch this space for more.
+
+** Videos
+
+The recorded presentations are available on Galois's channel Vimeo:
+ - [[https://vimeo.com/117221082][Part 1]]
+ - [[https://vimeo.com/117973383][Part 2]]
+ - [[https://vimeo.com/117979741][Part 3]]
